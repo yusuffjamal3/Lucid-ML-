@@ -309,7 +309,7 @@ DECODER_CONCAT_INPUT = Concatenate(axis=-1, name='concat_layer')(
 DECODER_DENSE = TimeDistributed(Dense(Y_VOC, activation='softmax'))
 DECODER_OUTPUTS = DECODER_DENSE(DECODER_CONCAT_INPUT)
 
-# Define the model 
+# Define the model
 MODEL = Model([ENCODER_INPUTS, DECODER_INPUTS], DECODER_OUTPUTS)
 
 MODEL.compile(optimizer='rmsprop', loss='sparse_categorical_crossentropy')
@@ -343,6 +343,7 @@ DECODER_HIDDEN_STATE_INPUT = Input(shape=(MAX_TEXT_LEN,
 
 # Get the embeddings of the decoder sequence
 DEC_EMB2 = DEC_EMB_LAYER(DECODER_INPUTS)
+
 # To predict the next word in the sequence, set the initial states to the states from the previous time step
 DECODER_OUTPUTS2, NEW_STRING2, STATE_C2 = DECODER_LSTM(DEC_EMB2,
                                                        initial_state=[DECODER_STATE_INPUT_H,
