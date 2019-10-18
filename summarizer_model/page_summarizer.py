@@ -2,6 +2,7 @@
 
 import re
 import warnings
+import joblib
 
 from nltk.corpus import stopwords
 import numpy as np
@@ -424,3 +425,20 @@ for i in range(0, 100):
     print("Original summary:", seq2summary(Y_TR[i]))
     print("Predicted summary:", decode_sequence(X_TR[i].reshape(1, MAX_TEXT_LEN)))
     print("\n")
+
+def save_model(model):
+    filename = 'article.sav'
+    joblib.dump(model, filename)
+    print('Model successfully saved in article.sav')
+
+def main():
+    try:
+        model = Model
+
+        save_model(model)
+
+    except (NameError, ValueError) as error:
+        print("Error saving model", error)
+
+if __name__ == '__main__':
+    main()
