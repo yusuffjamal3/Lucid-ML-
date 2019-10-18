@@ -2,6 +2,7 @@
 
 import re
 import warnings
+import joblib
 
 from nltk.corpus import stopwords
 import numpy as np
@@ -308,7 +309,7 @@ DECODER_CONCAT_INPUT = Concatenate(axis=-1, name='concat_layer')(
 DECODER_DENSE = TimeDistributed(Dense(Y_VOC, activation='softmax'))
 DECODER_OUTPUTS = DECODER_DENSE(DECODER_CONCAT_INPUT)
 
-# Define the model 
+# Define the model
 MODEL = Model([ENCODER_INPUTS, DECODER_INPUTS], DECODER_OUTPUTS)
 
 MODEL.compile(optimizer='rmsprop', loss='sparse_categorical_crossentropy')
@@ -342,6 +343,7 @@ DECODER_HIDDEN_STATE_INPUT = Input(shape=(MAX_TEXT_LEN,
 
 # Get the embeddings of the decoder sequence
 DEC_EMB2 = DEC_EMB_LAYER(DECODER_INPUTS)
+
 # To predict the next word in the sequence, set the initial states to the states from the previous time step
 DECODER_OUTPUTS2, NEW_STRING2, STATE_C2 = DECODER_LSTM(DEC_EMB2,
                                                        initial_state=[DECODER_STATE_INPUT_H,
@@ -424,3 +426,20 @@ for i in range(0, 100):
     print("Original summary:", seq2summary(Y_TR[i]))
     print("Predicted summary:", decode_sequence(X_TR[i].reshape(1, MAX_TEXT_LEN)))
     print("\n")
+
+def save_model(model):
+    filename = 'article.sav'
+    joblib.dump(model, filename)
+    print('Model successfully saved in article.sav')
+
+def main():
+    try:
+        model = Model
+
+        save_model(model)
+
+    except (NameError, ValueError) as error:
+        print("Error saving model", error)
+
+if __name__ == '__main__':
+    main()
