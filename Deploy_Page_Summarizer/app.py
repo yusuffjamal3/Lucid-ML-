@@ -43,7 +43,6 @@ def summarized_article():
     for texts in text_string:
         text = texts.lower()
     text = re.sub("[^a-zA-Z.,]", " ", text)
-    print(text)
     freq_table = summarizer.generate_frequency_table(text)
     sentences = sent_tokenize(text)
     sentence_scores = summarizer.rank_sentences(sentences, freq_table)
