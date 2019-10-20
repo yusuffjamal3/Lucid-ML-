@@ -28,7 +28,9 @@ K.clear_session()
 pd.set_option("display.max_colwidth", 200)
 warnings.filterwarnings("ignore")
 
+#read database
 DATA = pd.read_csv('posts_content.csv')
+#removing unwanted features
 DATA = DATA.drop(['user_id', 'tags', 'Unnamed: 4'], axis=1)
 DATA.head()
 
@@ -101,6 +103,8 @@ STOP_WORDS = set(stopwords.words('english'))
 
 
 def text_cleaner(text, num):
+  '''Remove unwanted characters, stopwords, and format the text to create fewer nulls word embeddings'''
+    #Format words and remove unwanted characters 
     new_string = text.lower()
     new_string = BeautifulSoup(new_string, "lxml").text
     new_string = re.sub(r'\([^)]*\)', '', new_string)
@@ -110,10 +114,12 @@ def text_cleaner(text, num):
     new_string = re.sub(r"'s\b", "", new_string)
     new_string = re.sub("[^a-zA-Z]", " ", new_string)
     new_string = re.sub('[m]{2,}', 'mm', new_string)
+     #remove stopwords
     if num == 0:
         tokens = [w for w in new_string.split() if not w in STOP_WORDS]
     else:
         tokens = new_string.split()
+    #replace contraction with their long form 
     long_words = []
 
     for i in tokens:
@@ -121,7 +127,7 @@ def text_cleaner(text, num):
             long_words.append(i)
     return (" ".join(long_words)).strip()
 
-
+#cleaning the data and storing cleaned data
 CLEANED_TEXT = []
 for t in DATA['content']:
     CLEANED_TEXT.append(text_cleaner(t, 0))
@@ -136,6 +142,7 @@ DATA['CLEANED_SUMMARY'] = CLEANED_SUMMARY
 DATA.replace('', np.nan, inplace=True)
 DATA.dropna(axis=0, inplace=True)
 
+#find the number of times a word appears in the text and the size of the vocabulary
 CNT = 0
 for i in DATA['CLEANED_SUMMARY']:
     if len(i.split()) <= 8:
@@ -263,56 +270,104 @@ X_VAL = np.delete(X_VAL, IND, axis=0)
 
 LATENT_DIM = 300
 EMBEDDING_DIM = 100
-# Encoder
-ENCODER_INPUTS = Input(shape=(MAX_TEXT_LEN,))
 
-# embedding layer
-ENC_EMB = Embedding(X_VOC, EMBEDDING_DIM, trainable=True)(ENCODER_INPUTS)
+def encoder(MAX_TEXT_LEN):
+    '''creating the encoder layer'''
+    # Encoder
+    ENCODER_INPUTS = Input(shape=(MAX_TEXT_LEN,))
+    
+    # embedding layer
+    ENC_EMB = Embedding(X_VOC, EMBEDDING_DIM, trainable=True)(ENCODER_INPUTS)
+    
+    # encoder lstm 1
+    ENCODER_LSTM1 = LSTM(LATENT_DIM, return_sequences=True, return_state=True,
+                         dropout=0.4, recurrent_dropout=0.4)
+    ENCODER_OUTPUT1, STATE_H1, STATE_C1 = ENCODER_LSTM1(ENC_EMB)
+    
+    # encoder lstm 2
+    ENCODER_LSTM2 = LSTM(LATENT_DIM, return_sequences=True, return_state=True,
+                         dropout=0.4, recurrent_dropout=0.4)
+    ENCODER_OUTPUT2, STATE_H2, STATE_C2 = ENCODER_LSTM2(ENCODER_OUTPUT1)
+    
+    # encoder lstm 3
+    ENCODER_LSTM3 = LSTM(LATENT_DIM, return_state=True, return_sequences=True,
+                         dropout=0.4, recurrent_dropout=0.4)
+    ENCODER_OUTPUTS, STATE_H, STATE_C = ENCODER_LSTM3(ENCODER_OUTPUT2)
+    return ENCODER_OUTPUTS, STATE_H, STATE_C,STATE_H2, STATE_C2 ,ENCODER_INPUTS,
 
-# encoder lstm 1
-ENCODER_LSTM1 = LSTM(LATENT_DIM, return_sequences=True, return_state=True,
-                     dropout=0.4, recurrent_dropout=0.4)
-ENCODER_OUTPUT1, STATE_H1, STATE_C1 = ENCODER_LSTM1(ENC_EMB)
+ENCODER_OUTPUTS, STATE_H, STATE_C,STATE_H2, STATE_C2,ENCODER_INPUTS = encoder(MAX_TEXT_LEN)
 
-# encoder lstm 2
-ENCODER_LSTM2 = LSTM(LATENT_DIM, return_sequences=True, return_state=True,
-                     dropout=0.4, recurrent_dropout=0.4)
-ENCODER_OUTPUT2, STATE_H2, STATE_C2 = ENCODER_LSTM2(ENCODER_OUTPUT1)
+def decoder(ENCODER_OUTPUTS, STATE_H, STATE_C,STATE_H2, STATE_C2,ENCODER_INPUTS):
+    '''creating the decoder layer'''
+    # Set up the decoder, using `encoder_states` as initial state.
+    DECODER_INPUTS = Input(shape=(None,))
+    
+    # embedding layer
+    DEC_EMB_LAYER = Embedding(Y_VOC, EMBEDDING_DIM, trainable=True)
+    DEC_EMB = DEC_EMB_LAYER(DECODER_INPUTS)
+    
+    DECODER_LSTM = LSTM(LATENT_DIM, return_sequences=True, return_state=True,
+                        dropout=0.4, recurrent_dropout=0.2)
+    DECODER_OUTPUTS, DECODER_FWD_STATE, DECODER_BACK_STATE = DECODER_LSTM(
+        DEC_EMB,
+        initial_state=[STATE_H, STATE_C])
+    
+    # Attention layer
+    ATTN_LAYER = AttentionLayer(name='attention_layer')
+    ATTN_OUT, ATTN_STATES = ATTN_LAYER([ENCODER_OUTPUTS, DECODER_OUTPUTS])
+    
+    # Concat attention input and decoder LSTM output
+    DECODER_CONCAT_INPUT = Concatenate(axis=-1, name='concat_layer')(
+        [DECODER_OUTPUTS, ATTN_OUT])
+    
+    # dense layer
+    DECODER_DENSE = TimeDistributed(Dense(Y_VOC, activation='softmax'))
+    DECODER_OUTPUTS = DECODER_DENSE(DECODER_CONCAT_INPUT)
+    # Decoder setup
+    # Below tensors will hold the states of the previous time step
+    DECODER_STATE_INPUT_H = Input(shape=(LATENT_DIM,))
+    DECODER_STATE_INPUT_C = Input(shape=(LATENT_DIM,))
+    DECODER_HIDDEN_STATE_INPUT = Input(shape=(MAX_TEXT_LEN,
+                                              LATENT_DIM))
+    
+    # Get the embeddings of the decoder sequence
+    DEC_EMB2 = DEC_EMB_LAYER(DECODER_INPUTS)
+    # To predict the next word in the sequence, set the initial states to the states from the previous time step
+    DECODER_OUTPUTS2, NEW_STRING2, STATE_C2 = DECODER_LSTM(DEC_EMB2,
+                                                           initial_state=[DECODER_STATE_INPUT_H,
+                                                                          DECODER_STATE_INPUT_C])
+    
+    # attention inference
+    ATTN_OUT_INF, ATTN_STATES_INF = ATTN_LAYER([DECODER_HIDDEN_STATE_INPUT,
+                                                DECODER_OUTPUTS2])
+    DECODER_INF_CONCAT = Concatenate(axis=-1, name='concat')([DECODER_OUTPUTS2,
+                                                              ATTN_OUT_INF])
+    
+    # A dense softmax layer to generate prob dist. over the target vocabulary
+    DECODER_OUTPUTS2 = DECODER_DENSE(DECODER_INF_CONCAT)
+    
+    # Final decoder model
+    DECODER_MODEL = Model(
+        [DECODER_INPUTS] + [DECODER_HIDDEN_STATE_INPUT, DECODER_STATE_INPUT_H,
+                            DECODER_STATE_INPUT_C],
+        [DECODER_OUTPUTS2] + [STATE_H2, STATE_C2])
 
-# encoder lstm 3
-ENCODER_LSTM3 = LSTM(LATENT_DIM, return_state=True, return_sequences=True,
-                     dropout=0.4, recurrent_dropout=0.4)
-ENCODER_OUTPUTS, STATE_H, STATE_C = ENCODER_LSTM3(ENCODER_OUTPUT2)
+    
+    return DECODER_INPUTS, DECODER_OUTPUTS,DEC_EMB_LAYER,DECODER_LSTM,DECODER_MODEL
 
-# Set up the decoder, using `encoder_states` as initial state.
-DECODER_INPUTS = Input(shape=(None,))
+DECODER_INPUTS, DECODER_OUTPUTS,DEC_EMB_LAYER,DECODER_LSTM,DECODER_MODEL = decoder(ENCODER_OUTPUTS, STATE_H, STATE_C,ENCODER_INPUTS)
 
-# embedding layer
-DEC_EMB_LAYER = Embedding(Y_VOC, EMBEDDING_DIM, trainable=True)
-DEC_EMB = DEC_EMB_LAYER(DECODER_INPUTS)
+def model(ENCODER_OUTPUTS, STATE_H, STATE_C,ENCODER_INPUTS,DECODER_INPUTS, DECODER_OUTPUTS):
+    '''creating the model'''
+    # Define the model 
+    MODEL = Model([ENCODER_INPUTS, DECODER_INPUTS], DECODER_OUTPUTS)
+    
+    MODEL.compile(optimizer='rmsprop', loss='sparse_categorical_crossentropy')
+    
+    return MODEL
 
-DECODER_LSTM = LSTM(LATENT_DIM, return_sequences=True, return_state=True,
-                    dropout=0.4, recurrent_dropout=0.2)
-DECODER_OUTPUTS, DECODER_FWD_STATE, DECODER_BACK_STATE = DECODER_LSTM(
-    DEC_EMB,
-    initial_state=[STATE_H, STATE_C])
-
-# Attention layer
-ATTN_LAYER = AttentionLayer(name='attention_layer')
-ATTN_OUT, ATTN_STATES = ATTN_LAYER([ENCODER_OUTPUTS, DECODER_OUTPUTS])
-
-# Concat attention input and decoder LSTM output
-DECODER_CONCAT_INPUT = Concatenate(axis=-1, name='concat_layer')(
-    [DECODER_OUTPUTS, ATTN_OUT])
-
-# dense layer
-DECODER_DENSE = TimeDistributed(Dense(Y_VOC, activation='softmax'))
-DECODER_OUTPUTS = DECODER_DENSE(DECODER_CONCAT_INPUT)
-
-# Define the model
-MODEL = Model([ENCODER_INPUTS, DECODER_INPUTS], DECODER_OUTPUTS)
-
-MODEL.compile(optimizer='rmsprop', loss='sparse_categorical_crossentropy')
+#declaring the model
+MODEL = model(ENCODER_OUTPUTS, STATE_H, STATE_C,ENCODER_INPUTS,DECODER_INPUTS, DECODER_OUTPUTS)
 
 ES = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=2)
 
@@ -334,35 +389,6 @@ ENCODER_MODEL = Model(inputs=ENCODER_INPUTS,
                       outputs=[ENCODER_OUTPUTS,
                                STATE_H, STATE_C])
 
-# Decoder setup
-# Below tensors will hold the states of the previous time step
-DECODER_STATE_INPUT_H = Input(shape=(LATENT_DIM,))
-DECODER_STATE_INPUT_C = Input(shape=(LATENT_DIM,))
-DECODER_HIDDEN_STATE_INPUT = Input(shape=(MAX_TEXT_LEN,
-                                          LATENT_DIM))
-
-# Get the embeddings of the decoder sequence
-DEC_EMB2 = DEC_EMB_LAYER(DECODER_INPUTS)
-
-# To predict the next word in the sequence, set the initial states to the states from the previous time step
-DECODER_OUTPUTS2, NEW_STRING2, STATE_C2 = DECODER_LSTM(DEC_EMB2,
-                                                       initial_state=[DECODER_STATE_INPUT_H,
-                                                                      DECODER_STATE_INPUT_C])
-
-# attention inference
-ATTN_OUT_INF, ATTN_STATES_INF = ATTN_LAYER([DECODER_HIDDEN_STATE_INPUT,
-                                            DECODER_OUTPUTS2])
-DECODER_INF_CONCAT = Concatenate(axis=-1, name='concat')([DECODER_OUTPUTS2,
-                                                          ATTN_OUT_INF])
-
-# A dense softmax layer to generate prob dist. over the target vocabulary
-DECODER_OUTPUTS2 = DECODER_DENSE(DECODER_INF_CONCAT)
-
-# Final decoder model
-DECODER_MODEL = Model(
-    [DECODER_INPUTS] + [DECODER_HIDDEN_STATE_INPUT, DECODER_STATE_INPUT_H,
-                        DECODER_STATE_INPUT_C],
-    [DECODER_OUTPUTS2] + [STATE_H2, STATE_C2])
 
 
 def decode_sequence(input_seq):
