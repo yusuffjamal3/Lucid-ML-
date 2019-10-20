@@ -57,7 +57,7 @@ import summarizer
 
 - Rendered two pages (The first page takes text, the second takes urls)
 
-- Used beautiful soup to parse the html and extract text data from the <p> tags
+- Used beautiful soup to parse the html and extract text data from the p tags
   
 - Used the functions created within the summarizer script to summarize text entered.
 
