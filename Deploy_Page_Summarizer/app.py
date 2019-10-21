@@ -11,6 +11,7 @@ import requests
 from pandas.io.json import json_normalize
 import summarizer
 nltk.download('punkt')
+nltk.download('stopwords')
 
 app = Flask(__name__)
 
